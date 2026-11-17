@@ -116,5 +116,6 @@ Useful links: the URL updates as you explore (for example `#g=CD3E&c=Stim8hr&m=c
 | `preprocess.py` | Streams the raw `.h5ad` from S3 and writes `data/` |
 | `scripts/model_check.js` | Runs the model across all genes, writes `data/model_check.json` |
 | `data/` | Small JSON files used by the website (~9 MB total) |
+| `presentation/` | Model-check summary chart (HTML + PNG, light and dark) for slides |
 
 The raw `.h5ad` file is never committed (see `.gitignore`).

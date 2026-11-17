@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model Check Summary</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --text: #1b1b1a; --text-2: #5c5c57; --grid: #e4e3de; --axis: #b9b8b0;
+    --s-model: #2a78d6; --s-base: #8a8a84; --s-up: #eb6834;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7; --grid: #2e2e2c; --axis: #55554f;
+      --s-model: #3987e5; --s-base: #8f8e88; --s-up: #d95926; color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --surface: #1a1a19; --text: #f0efec; --text-2: #c3c2b7; --grid: #2e2e2c; --axis: #55554f;
+    --s-model: #3987e5; --s-base: #8f8e88; --s-up: #d95926; color-scheme: dark;
+  }
+  body { margin: 0; background: var(--surface); color: var(--text); font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 28px 16px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--text-2); margin: 0 0 16px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 8px; font-size: .95rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+  svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .tick { fill: var(--text-2); font-size: 13px; }
+  .cat { fill: var(--text); font-size: 15px; font-weight: 600; }
+  .val { fill: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .bar { transition: opacity .15s; }
+  .bar:hover { opacity: .8; }
+  .tip { position: fixed; pointer-events: none; background: var(--text); color: var(--surface); padding: 6px 9px; border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity .1s; max-width: 260px; }
+  .note { color: var(--text-2); font-size: .9rem; margin-top: 12px; }
+  table { border-collapse: collapse; margin-top: 14px; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  th, td { padding: 4px 12px; border-bottom: 1px solid var(--grid); text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  details { margin-top: 10px; color: var(--text-2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Does the chain-reaction model predict real measurements?</h1>
+  <p class="sub">Median correlation between predicted indirect effects (step 2) and measured effects, across hundreds of knockdowns per condition</p>
+  <div class="legend" id="legend"></div>
+  <div id="chart"></div>
+  <p class="note">Higher is better (1 = perfect, 0 = no relationship). The model's match (blue) is about the same as pairing each prediction with a <b>random</b> knockdown (gray), so it mostly reflects a generic response shared by many knockdowns. Assuming "up" is the opposite of "down" (orange) makes predictions worse than random.</p>
+  <details>
+    <summary>Show as table</summary>
+    <table id="tbl"></table>
+  </details>
+</div>
+<div class="tip" id="tip"></div>
+<script>
+  // From data/model_check.json (depth 2, minimum effect 0.1 log2FC, knockdowns with >= 20 targets)
+  const conds = ["Rest", "Stim 8hr", "Stim 48hr"];
+  const series = [
+    { key: "model", name: "Model: only genes that went down pass effects on", color: "--s-model", v: [0.457, 0.380, 0.468], n: [365, 447, 528] },
+    { key: "base",  name: "Baseline: compared with a random other knockdown", color: "--s-base",  v: [0.407, 0.387, 0.403], n: [365, 447, 528] },
+    { key: "up",    name: "Model variant: genes that went up also pass effects on", color: "--s-up", v: [-0.138, -0.215, 0.018], n: [655, 775, 745] },
+  ];
+  const W = 900, H = 400, m = { l: 48, r: 10, t: 26, b: 40 };
+  const lo = -0.3, hi = 0.6;
+  const y = (v) => m.t + ((hi - v) / (hi - lo)) * (H - m.t - m.b);
+  const gw = (W - m.l - m.r) / conds.length, bw = 58, gap = 4;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Grouped bar chart of median correlation by condition">`;
+  for (let t = lo; t <= hi + 1e-9; t += 0.1) {
+    const v = +t.toFixed(1);
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(${v === 0 ? "--axis" : "--grid"})" stroke-width="${v === 0 ? 1.5 : 1}"/>`;
+    s += `<text class="tick" x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(1)}</text>`;
+  }
+  s += `<text class="tick" transform="translate(12 ${(H - m.b + m.t) / 2}) rotate(-90)" text-anchor="middle">median correlation (r)</text>`;
+  conds.forEach((c, ci) => {
+    const cx = m.l + gw * (ci + 0.5), x0 = cx - (series.length * bw + (series.length - 1) * gap) / 2;
+    series.forEach((se, si) => {
+      const v = se.v[ci], x = x0 + si * (bw + gap), top = Math.min(y(v), y(0)), h = Math.max(1, Math.abs(y(v) - y(0)));
+      // rounded data-end (away from the baseline), square at the baseline
+      const r = Math.min(4, h);
+      const d = v >= 0
+        ? `M${x},${y(0)} V${top + r} Q${x},${top} ${x + r},${top} H${x + bw - r} Q${x + bw},${top} ${x + bw},${top + r} V${y(0)} Z`
+        : `M${x},${y(0)} V${top + h - r} Q${x},${top + h} ${x + r},${top + h} H${x + bw - r} Q${x + bw},${top + h} ${x + bw},${top + h - r} V${y(0)} Z`;
+      s += `<path class="bar" d="${d}" fill="var(${se.color})" data-tip="${c} · ${se.name}: median r = ${v.toFixed(2)} (${se.n[ci]} knockdowns)"/>`;
+      s += `<text class="val" x="${x + bw / 2}" y="${v >= 0 ? y(v) - 6 : y(v) + 16}" text-anchor="middle">${v.toFixed(2)}</text>`;
+    });
+    s += `<text class="cat" x="${cx}" y="${H - 12}" text-anchor="middle">${c}</text>`;
+  });
+  s += "</svg>";
+  document.getElementById("chart").innerHTML = s;
+  document.getElementById("legend").innerHTML = series.map((se) => `<span><i class="sw" style="background:var(${se.color})"></i>${se.name}</span>`).join("");
+  document.getElementById("tbl").innerHTML = "<tr><th>Condition</th>" + series.map((se) => `<th>${se.name}</th>`).join("") + "</tr>" +
+    conds.map((c, ci) => `<tr><td>${c}</td>${series.map((se) => `<td>${se.v[ci].toFixed(2)}</td>`).join("")}</tr>`).join("");
+  const tip = document.getElementById("tip");
+  document.querySelectorAll(".bar").forEach((b) => {
+    b.addEventListener("mousemove", (e) => { tip.textContent = b.dataset.tip; tip.style.left = e.clientX + 12 + "px"; tip.style.top = e.clientY + 12 + "px"; tip.style.opacity = 1; });
+    b.addEventListener("mouseleave", () => (tip.style.opacity = 0));
+  });
+</script>
+</body>
+</html>
