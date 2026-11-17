@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Virtual Knockdown Explorer</title>
+  <meta name="description" content="Pick a gene, knock it down, and see measured and predicted effects in human CD4+ T cells (genome-scale CRISPRi Perturb-seq).">
+  <link rel="stylesheet" href="css/style.css">
+  <!-- Cytoscape.js, pinned version -->
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"
+          integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4"
+          crossorigin="anonymous"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">⬇</span>
+    <div>
+      <h1>Virtual Knockdown Explorer</h1>
+      <p class="subtitle">Human CD4+ T cells · genome-scale CRISPRi Perturb-seq</p>
+    </div>
+  </div>
+  <nav class="top-actions">
+    <a href="#about" class="link-btn">About</a>
+    <button id="themeBtn" class="icon-btn" title="Toggle light / dark mode" aria-label="Toggle light or dark mode"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.4A5.5 5.5 0 0 1 13.4 3.1 9 9 0 0 0 12 3z"/></svg></button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== Controls ===================== -->
+  <section class="controls card" aria-label="Controls">
+    <div class="ctl ctl-search">
+      <label for="geneInput">Gene to knock down</label>
+      <div class="ac-wrap">
+        <input id="geneInput" type="text" placeholder="Type a gene, e.g. GATA3" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="acList">
+        <ul id="acList" class="ac-list" role="listbox" hidden></ul>
+      </div>
+    </div>
+
+    <div class="ctl">
+      <span class="ctl-label">Cell condition</span>
+      <div class="seg" id="condSeg" role="radiogroup" aria-label="Cell condition">
+        <button data-cond="Rest" role="radio">Rest</button>
+        <button data-cond="Stim8hr" role="radio">Stim 8hr</button>
+        <button data-cond="Stim48hr" role="radio">Stim 48hr</button>
+      </div>
+    </div>
+
+    <div class="ctl">
+      <span class="ctl-label">View</span>
+      <div class="seg" id="modeSeg" role="radiogroup" aria-label="View mode">
+        <button data-mode="measured" role="radio">Measured effects</button>
+        <button data-mode="chain" role="radio">Predicted chain reaction</button>
+        <button data-mode="compare" role="radio">Compare conditions</button>
+      </div>
+    </div>
+
+    <div class="ctl ctl-slider">
+      <label for="topN">Top affected genes shown: <b id="topNVal">25</b></label>
+      <input id="topN" type="range" min="5" max="200" step="5" value="25">
+    </div>
+
+    <div class="ctl ctl-slider chain-only">
+      <label for="depth">Chain depth (steps): <b id="depthVal">2</b></label>
+      <input id="depth" type="range" min="1" max="3" step="1" value="2">
+    </div>
+
+    <div class="ctl ctl-slider chain-only">
+      <label for="cutoff">Minimum effect: <b id="cutoffVal">0.10</b> log₂FC</label>
+      <input id="cutoff" type="range" min="0.02" max="0.5" step="0.01" value="0.1">
+    </div>
+
+    <div class="ctl chain-only ctl-check">
+      <label class="checkline" for="propUp" title="The screen only measured what happens when a gene goes DOWN. Turning this on assumes a gene that goes UP has the exact opposite effects.">
+        <input id="propUp" type="checkbox"><span>Also pass effects through genes that went <b>up</b></span>
+      </label>
+      <span class="small muted">off = only use what was measured (knockdowns)</span>
+    </div>
+
+    <div class="ctl compare-only">
+      <label for="cond2">Compare with</label>
+      <select id="cond2">
+        <option value="Rest">Rest</option>
+        <option value="Stim8hr">Stim 8hr</option>
+        <option value="Stim48hr">Stim 48hr</option>
+      </select>
+    </div>
+  </section>
+
+  <section class="examples" aria-label="Example genes">
+    <span class="ctl-label">Try:</span>
+    <div id="exampleBtns" class="chips"></div>
+  </section>
+
+  <!-- ===================== Gene summary ===================== -->
+  <section id="summary" class="summary card" aria-live="polite">
+    <p class="muted">Loading data…</p>
+  </section>
+
+  <div id="chainNote" class="note chain-only" role="note">
+    <b>This is a simplified prediction.</b> Measured effects already include some indirect effects, so this model can double-count.
+    Solid arrows = measured (step 1). Dashed arrows = predicted only (step 2+). Rings = steps.
+  </div>
+
+  <!-- ===================== Network + side panel ===================== -->
+  <section class="workspace">
+    <div class="graph-area card">
+      <div class="graph-head">
+        <div class="legend" aria-label="Legend">
+          <span><i class="dot down"></i> went down</span>
+          <span><i class="dot up"></i> went up</span>
+          <span><i class="dot src"></i> knocked-down gene</span>
+          <span class="chain-only"><i class="line dashed"></i> predicted only</span>
+          <span class="compare-only"><i class="dot only"></i> affected in only this condition</span>
+          <span class="muted small">Bigger circle = stronger effect</span>
+        </div>
+        <button id="fitBtn" class="small-btn" title="Re-center the network">Re-center</button>
+      </div>
+      <div id="graphs" class="graphs">
+        <div class="graph-pane">
+          <div class="pane-title compare-only" id="paneTitle1"></div>
+          <div id="cy1" class="cy" role="img" aria-label="Network of affected genes"></div>
+        </div>
+        <div class="graph-pane compare-only">
+          <div class="pane-title" id="paneTitle2"></div>
+          <div id="cy2" class="cy" role="img" aria-label="Network of affected genes in second condition"></div>
+        </div>
+      </div>
+      <div id="graphMsg" class="graph-msg" hidden></div>
+    </div>
+
+    <aside class="side">
+      <div id="details" class="card details">
+        <h3>Gene details</h3>
+        <p class="muted">Click any circle in the network to see its details.</p>
+      </div>
+
+      <div id="checkPanel" class="card check chain-only">
+        <h3>Model check</h3>
+        <p class="small muted">Does the chain reaction (step 2+ only) predict the effects that were actually measured?</p>
+        <div id="scatter" class="scatter"></div>
+        <div id="checkStats" class="check-stats"></div>
+        <p class="small">A <b>good match</b> (correlation near +1) means the knocked-down gene's direct targets explain its other effects. A <b>bad match</b> (near 0 or negative) means the simple chain model misses how the cell really responds.</p>
+        <div id="globalCheck" class="global-check"></div>
+      </div>
+
+      <div id="comparePanel" class="card compare-only">
+        <h3>Condition comparison</h3>
+        <div id="compareStats"></div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ===================== Table ===================== -->
+  <section class="card table-card">
+    <div class="table-head">
+      <h3 id="tableTitle">Affected genes</h3>
+      <span id="tableCount" class="muted small"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="table">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== About ===================== -->
+  <section id="about" class="card about">
+    <h2>About this tool</h2>
+    <div class="about-grid">
+      <div>
+        <h4>What is Perturb-seq?</h4>
+        <p>Scientists switch off one gene in a cell, then read out the activity (RNA levels) of thousands of other genes in that single cell. Doing this for every gene, across millions of cells, maps which genes control which.</p>
+      </div>
+      <div>
+        <h4>What does CRISPRi knockdown mean?</h4>
+        <p>CRISPR interference uses a "dead" Cas9 that cannot cut DNA. It is guided to a gene's start and sits there, turning the gene <em>down</em> (not fully off). The tool shows how strongly each gene was actually reduced.</p>
+      </div>
+      <div>
+        <h4>What do the colors mean?</h4>
+        <p><span class="tag down">Blue</span> genes went <b>down</b> after the knockdown; <span class="tag up">red</span> genes went <b>up</b>. Effect sizes are log₂ fold changes: −1 means halved, +1 means doubled. Only genes with adjusted p-value &lt; 0.05 are shown (top 200 per gene).</p>
+      </div>
+      <div>
+        <h4>What does the chain-reaction model assume?</h4>
+        <p>If gene A lowers gene B, and we know what knocking down B does, then B passes on a proportional share of its own effects: share = (change in B) ÷ (B's own knockdown). Effects add up along paths and are capped. It assumes effects are linear and additive, ignores genes never knocked down in the screen, and can double-count because measured effects already contain indirect ones.</p>
+      </div>
+      <div>
+        <h4>Cell conditions</h4>
+        <p><b>Rest</b>: resting T cells. <b>Stim 8hr / 48hr</b>: T cells 8 or 48 hours after activation (as when fighting an infection). A key finding of the paper is that many regulators act very differently in resting vs. activated cells.</p>
+      </div>
+      <div>
+        <h4>Data &amp; citation</h4>
+        <p>Zhu, Dann <em>et al.</em> "Genome-scale perturb-seq in primary human CD4+ T cells maps context-specific regulators of T cell programs and human immune traits." <em>Cell</em> (2026). Data: <a href="https://virtualcellmodels.cziscience.com/dataset/genome-scale-tcell-perturb-seq" target="_blank" rel="noopener">CZI Virtual Cells Platform</a> (file GWCD4i.DE_stats.h5ad). Perturbations flagged for possible off-target effects or low target expression were removed.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer muted small">
+  Educational tool. Not for clinical use. Data: Zhu, Dann et al., Cell 2026.
+</footer>
+
+<script src="js/model.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

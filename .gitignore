@@ -1,0 +1,6 @@
+# Raw data (never commit; ~17 GB)
+*.h5ad
+*.h5mu
+__pycache__/
+.DS_Store
+node_modules/
