@@ -20,6 +20,10 @@
       <p class="subtitle">Human CD4+ T cells · genome-scale CRISPRi Perturb-seq</p>
     </div>
   </div>
+  <section class="examples" aria-label="Example genes">
+    <span class="ctl-label">Try:</span>
+    <div id="exampleBtns" class="chips"></div>
+  </section>
   <nav class="top-actions">
     <a href="#about" class="link-btn">About</a>
     <button id="themeBtn" class="icon-btn" title="Toggle light / dark mode" aria-label="Toggle light or dark mode"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9c0-.5 0-1-.1-1.4A5.5 5.5 0 0 1 13.4 3.1 9 9 0 0 0 12 3z"/></svg></button>
@@ -49,32 +53,31 @@
     <div class="ctl">
       <span class="ctl-label">View</span>
       <div class="seg" id="modeSeg" role="radiogroup" aria-label="View mode">
-        <button data-mode="measured" role="radio">Measured effects</button>
-        <button data-mode="chain" role="radio">Predicted chain reaction</button>
-        <button data-mode="compare" role="radio">Compare conditions</button>
+        <button data-mode="measured" role="radio" title="What actually changed in the experiment">Measured</button>
+        <button data-mode="chain" role="radio" title="Predicted chain reaction through the gene network">Chain reaction</button>
+        <button data-mode="compare" role="radio" title="Same knockdown in two cell conditions, side by side">Compare</button>
       </div>
     </div>
 
     <div class="ctl ctl-slider">
-      <label for="topN">Top affected genes shown: <b id="topNVal">25</b></label>
+      <label for="topN">Genes shown: <b id="topNVal">25</b></label>
       <input id="topN" type="range" min="5" max="200" step="5" value="25">
     </div>
 
     <div class="ctl ctl-slider chain-only">
-      <label for="depth">Chain depth (steps): <b id="depthVal">2</b></label>
+      <label for="depth">Depth (steps): <b id="depthVal">2</b></label>
       <input id="depth" type="range" min="1" max="3" step="1" value="2">
     </div>
 
     <div class="ctl ctl-slider chain-only">
-      <label for="cutoff">Minimum effect: <b id="cutoffVal">0.10</b> log₂FC</label>
+      <label for="cutoff">Min. effect: <b id="cutoffVal">0.10</b> log₂FC</label>
       <input id="cutoff" type="range" min="0.02" max="0.5" step="0.01" value="0.1">
     </div>
 
     <div class="ctl chain-only ctl-check">
       <label class="checkline" for="propUp" title="The screen only measured what happens when a gene goes DOWN. Turning this on assumes a gene that goes UP has the exact opposite effects.">
-        <input id="propUp" type="checkbox"><span>Also pass effects through genes that went <b>up</b></span>
+        <input id="propUp" type="checkbox"><span>Also pass effects through genes that went <b>up</b> <span class="muted">(off = only use what was measured)</span></span>
       </label>
-      <span class="small muted">off = only use what was measured (knockdowns)</span>
     </div>
 
     <div class="ctl compare-only">
@@ -87,20 +90,10 @@
     </div>
   </section>
 
-  <section class="examples" aria-label="Example genes">
-    <span class="ctl-label">Try:</span>
-    <div id="exampleBtns" class="chips"></div>
-  </section>
-
   <!-- ===================== Gene summary ===================== -->
   <section id="summary" class="summary card" aria-live="polite">
     <p class="muted">Loading data…</p>
   </section>
-
-  <div id="chainNote" class="note chain-only" role="note">
-    <b>This is a simplified prediction.</b> Measured effects already include some indirect effects, so this model can double-count.
-    Solid arrows = measured (step 1). Dashed arrows = predicted only (step 2+). Rings = steps.
-  </div>
 
   <!-- ===================== Network + side panel ===================== -->
   <section class="workspace">
@@ -115,6 +108,9 @@
           <span class="muted small">Bigger circle = stronger effect</span>
         </div>
         <button id="fitBtn" class="small-btn" title="Re-center the network">Re-center</button>
+      </div>
+      <div id="chainNote" class="note chain-only" role="note">
+        <b>This is a simplified prediction.</b> Measured effects already include some indirect effects, so this model can double-count. Solid = measured, dashed = predicted.
       </div>
       <div id="graphs" class="graphs">
         <div class="graph-pane">

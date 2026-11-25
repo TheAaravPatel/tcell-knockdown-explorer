@@ -75,6 +75,9 @@
         for (const k in d) m.set(+k, d[k]);
         DB.shards[cond][key] = m;
         return m;
+      }, (err) => {
+        delete DB.shards[cond][key]; // forget the failure so the next try downloads again
+        throw err;
       });
     }
     return DB.shards[cond][key];
@@ -103,8 +106,14 @@
   // Helpers
   // =====================================================================
   const fmt = (x, d = 2) => (x == null || !isFinite(x) ? "–" : (x > 0 ? "+" : "") + x.toFixed(d));
-  const fmtP = (p) => (p == null ? "–" : p < 1e-3 ? p.toExponential(1) : p.toPrecision(2));
+  const fmtP = (p) => (p == null ? "–" : p === 0 ? "< 1e-300" : p < 1e-3 ? p.toExponential(1) : p.toPrecision(2));
   const pctLeft = (lfc) => Math.round(100 * Math.pow(2, lfc));
+  /** Plain-language level: "23% of normal" for decreases, "3.5× normal" for big increases. */
+  const level = (lfc) => {
+    const f = Math.pow(2, lfc);
+    if (f < 2) return `${Math.round(100 * f)}% of normal`;
+    return `${f < 10 ? f.toFixed(1) : Math.round(f).toLocaleString()}× normal`;
+  };
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -117,10 +126,17 @@
   // =====================================================================
   // URL hash (so a specific view can be shared / bookmarked)
   // =====================================================================
+  let lastMajor = null;
   function writeHash() {
     if (state.gene == null) return;
     const h = new URLSearchParams({ g: name(state.gene), c: state.cond, m: state.mode, n: state.topN, d: state.depth, k: state.cutoff, c2: state.cond2, u: state.up ? 1 : 0 });
-    history.replaceState(null, "", "#" + h.toString());
+    // a new gene, condition or view gets its own history entry, so the browser's Back button
+    // returns to it; slider tweaks just update the current entry
+    const major = `${state.gene}|${state.cond}|${state.mode}|${state.cond2}`;
+    const url = "#" + h.toString();
+    if (lastMajor !== null && major !== lastMajor && url !== location.hash) history.pushState(null, "", url);
+    else history.replaceState(null, "", url);
+    lastMajor = major;
   }
   function readHash() {
     const h = new URLSearchParams(location.hash.slice(1));
@@ -170,15 +186,16 @@
     $("cutoff").addEventListener("input", (e) => { state.cutoff = +e.target.value; $("cutoffVal").textContent = state.cutoff.toFixed(2); rerender(); });
     $("cond2").addEventListener("change", (e) => { state.cond2 = e.target.value; update(); });
     $("propUp").addEventListener("change", (e) => { state.up = e.target.checked; update(); });
-    const refit = (cy) => { if (!cy) return; cy.fit(undefined, 20); if (cy.zoom() > 1.3) { cy.zoom(1.3); cy.center(); } };
     $("fitBtn").addEventListener("click", () => { refit(cy1); refit(cy2); });
     $("themeBtn").addEventListener("click", () => {
       const dark = getComputedStyle(document.documentElement).colorScheme === "dark";
       document.documentElement.dataset.theme = dark ? "light" : "dark";
       try { localStorage.setItem("kd-theme", document.documentElement.dataset.theme); } catch (e) {}
-      update();
+      // recolor in place so the selected gene and zoom are kept
+      for (const cy of [cy1, cy2]) if (cy) cy.style(cyStyle());
+      if (state.mode === "chain" && lastCheck) renderCheck(lastCheck.chk, lastCheck.steps); else renderGlobalCheck();
     });
-    window.addEventListener("resize", debounce(() => { cy1 && cy1.resize(); cy2 && cy2.resize(); }, 150));
+    window.addEventListener("resize", debounce(() => { for (const cy of [cy1, cy2]) if (cy) { cy.resize(); refit(cy); } }, 150));
     setupAutocomplete();
   }
 
@@ -212,6 +229,7 @@
     input.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault(); if (list.hidden) show();
+        if (!items.length) return;
         active = (active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length; show();
       } else if (e.key === "Enter") {
         e.preventDefault();
@@ -329,12 +347,27 @@
       textureOnViewport: true, hideEdgesOnViewport: elements.length > 600, pixelRatio: "auto",
       boxSelectionEnabled: false,
     });
-    cy.fit(undefined, 20);
-    if (cy.zoom() > 1.3) { cy.zoom(1.3); cy.center(); } // don't blow up tiny networks
+    refit(cy); // fit, but don't blow up tiny networks
     cy.on("tap", "node", (e) => onNodeTap(cy, e.target));
+    cy.on("mouseover", "node", (e) => showTip(e.target, e.originalEvent));
+    cy.on("mousemove", "node", (e) => moveTip(e.originalEvent));
+    cy.on("mouseout", "node", hideTip);
+    cy.on("viewport", hideTip);
     cy.on("tap", (e) => { if (e.target === cy) { cy.elements().removeClass("faded hl"); } });
     return cy;
   }
+
+  // hover tooltip: gene name + effect (labels get too small to read in big networks)
+  const tipEl = document.createElement("div");
+  tipEl.className = "node-tip"; tipEl.hidden = true; document.body.appendChild(tipEl);
+  function showTip(node, ev) {
+    const v = node.data("v");
+    tipEl.innerHTML = node.data("src") ? `<b>${esc(node.data("label"))}</b> · knocked down`
+      : `<b>${esc(node.data("label"))}</b> · ${v < 0 ? "down" : "up"} ${fmt(v)} log₂FC (~${level(v)})${node.data("only") ? "<br>affected in only this condition" : ""}`;
+    tipEl.hidden = false; moveTip(ev);
+  }
+  function moveTip(ev) { if (!ev || tipEl.hidden) return; tipEl.style.left = ev.clientX + 14 + "px"; tipEl.style.top = ev.clientY + 14 + "px"; }
+  function hideTip() { tipEl.hidden = true; }
 
   function onNodeTap(cy, node) {
     cy.elements().addClass("faded");
@@ -373,7 +406,10 @@
     if (msg) { el.innerHTML = msg; el.hidden = false; } else el.hidden = true;
   }
 
+  function refit(cy) { if (!cy) return; cy.fit(undefined, 20); if (cy.zoom() > 1.3) { cy.zoom(1.3); cy.center(); } }
+
   function destroyCys() {
+    hideTip();
     if (cy1) { cy1.destroy(); cy1 = null; }
     if (cy2) { cy2.destroy(); cy2 = null; }
   }
@@ -396,9 +432,15 @@
     return ringPositions([[], ids], 40);
   }
 
+  /** Show "Loading..." only if the download takes more than a moment. */
+  async function withLoading(token, promise) {
+    const t = setTimeout(() => { if (token === renderToken) showGraphMsg("<div>Loading data…</div>"); }, 150);
+    try { return await promise; } finally { clearTimeout(t); if (token === renderToken && /Loading/.test($("graphMsg").textContent)) showGraphMsg(null); }
+  }
+
   async function renderMeasured(token) {
     const gi = state.gene, c = state.cond;
-    await ensure(c, [gi]);
+    await withLoading(token, ensure(c, [gi]));
     if (token !== renderToken) return;
     const all = getTargets(c, gi);
     if (!all || !all.length) { showGraphMsg(noTargetsMsg(gi, c)); renderTable([], "measured"); return; }
@@ -433,10 +475,10 @@
 
   async function renderChain(token) {
     const gi = state.gene, c = state.cond;
-    await ensure(c, [gi]);
+    await withLoading(token, ensure(c, [gi]));
     if (token !== renderToken) return;
     if (!(getTargets(c, gi) || []).length) { showGraphMsg(noTargetsMsg(gi, c)); renderTable([], "chain"); renderCheck(null); return; }
-    showGraphMsg('<div>Computing chain reaction…</div>');
+    showGraphMsg("<div>Computing chain reaction… (first time in a condition may download a few MB)</div>");
     const res = await runChain(c, gi, state.depth, state.cutoff, state.up);
     if (token !== renderToken) return;
     showGraphMsg(null);
@@ -488,7 +530,7 @@
   // ---------- Compare view ----------
   async function renderCompare(token) {
     const gi = state.gene, a = state.cond, b = state.cond2;
-    await Promise.all([ensure(a, [gi]), ensure(b, [gi])]);
+    await withLoading(token, Promise.all([ensure(a, [gi]), ensure(b, [gi])]));
     if (token !== renderToken) return;
     const ta = getTargets(a, gi) || [], tb = getTargets(b, gi) || [];
     const ma = new Map(ta.map((t) => [t[0], t])), mb = new Map(tb.map((t) => [t[0], t]));
@@ -546,6 +588,7 @@
       return;
     }
     const meas = (getTargets(cond, src) || []).find((t) => t[0] === gi);
+    if (state.mode === "compare") return showCompareDetails(gi);
     let chainInfo = "";
     if (state.mode === "chain") {
       const res = chainCache.get(chainKey(state.cond, src, state.depth, state.cutoff, state.up));
@@ -560,11 +603,24 @@
     const anyCond = CONDS.find((c) => DB.pert[c].has(gi));
     el.innerHTML = `<h3>${esc(name(gi))}</h3>
       <dl>
-        <dt>Measured change</dt><dd>${meas ? `${dirTag(meas[1])} ${fmt(meas[1])} log₂FC (~${pctLeft(meas[1])}% of normal)` : "not significant"}</dd>
+        <dt>Measured change</dt><dd>${meas ? `${dirTag(meas[1])} ${fmt(meas[1])} log₂FC (~${level(meas[1])})` : "not significant"}</dd>
         ${meas ? `<dt>Adjusted p</dt><dd>${fmtP(meas[2])}</dd>` : ""}
         ${chainInfo}
         <dt>Own knockdown</dt><dd>${p ? `${p.nSig} targets in ${COND_LABEL[cond]}${p.kd != null ? `, reduced to ~${pctLeft(p.kd)}%` : ""}` : DB.removed[cond].has(gi) ? "filtered by QC here" : "not knocked down in this condition"}</dd>
       </dl>
+      <button class="btn" id="kdThis" ${anyCond ? "" : "disabled"}>${anyCond ? `Knock ${esc(name(gi))} down instead` : "Never knocked down in this screen"}</button>`;
+    if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: "smooth" }); });
+  }
+
+  function showCompareDetails(gi) {
+    const src = state.gene, el = $("details");
+    const row = (c) => {
+      const m = (getTargets(c, src) || []).find((t) => t[0] === gi);
+      return `<dt>${COND_LABEL[c]}</dt><dd>${m ? `${dirTag(m[1])} ${fmt(m[1])} log₂FC (~${level(m[1])}), adj. p ${fmtP(m[2])}` : "not significant"}</dd>`;
+    };
+    const anyCond = CONDS.find((c) => DB.pert[c].has(gi));
+    el.innerHTML = `<h3>${esc(name(gi))}</h3><p class="small muted" style="margin:0">Change after knocking down ${esc(name(src))}:</p>
+      <dl>${row(state.cond)}${row(state.cond2)}</dl>
       <button class="btn" id="kdThis" ${anyCond ? "" : "disabled"}>${anyCond ? `Knock ${esc(name(gi))} down instead` : "Never knocked down in this screen"}</button>`;
     if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: "smooth" }); });
   }
@@ -579,7 +635,7 @@
         { k: "gene", t: "Gene", f: (r) => `<span class="genelink">${esc(name(r.gi))}</span>`, s: (r) => name(r.gi) },
         { k: "dir", t: "Direction", f: (r) => dirTag(r.lfc), s: (r) => Math.sign(r.lfc) },
         { k: "lfc", t: "Effect (log₂FC)", f: (r) => fmt(r.lfc), s: (r) => Math.abs(r.lfc) },
-        { k: "pct", t: "% of normal", f: (r) => pctLeft(r.lfc) + "%", s: (r) => r.lfc },
+        { k: "pct", t: "Level vs normal", f: (r) => level(r.lfc), s: (r) => r.lfc },
         { k: "padj", t: "Adjusted p", f: (r) => fmtP(r.padj), s: (r) => -r.padj },
       ],
       sortKey: "lfc",
@@ -637,20 +693,30 @@
   $("table").tBodies[0].addEventListener("click", (e) => {
     const tr = e.target.closest("tr[data-g]"); if (!tr) return;
     const gi = +tr.dataset.g;
-    const node = cy1 && cy1.getElementById(String(gi));
-    if (node && node.length) { cy1.$(":selected").unselect(); node.select(); onNodeTap(cy1, node); cy1.animate({ center: { eles: node } }, { duration: 300 }); }
-    else showDetails(gi, state.cond);
+    let found = false;
+    for (const cy of [cy1, cy2]) {
+      const node = cy && cy.getElementById(String(gi));
+      if (node && node.length) { cy.$(":selected").unselect(); node.select(); onNodeTap(cy, node); cy.animate({ center: { eles: node } }, { duration: 300 }); found = true; }
+    }
+    if (!found) showDetails(gi, state.cond);
     $("details").scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 
   // =====================================================================
   // Model check panel (scatter of predicted indirect vs measured)
   // =====================================================================
+  let lastCheck = null;
+  const MIN_CHECK_GENES = 10;
   function renderCheck(chk, steps) {
     const box = $("scatter"), stats = $("checkStats");
+    lastCheck = chk ? { chk, steps } : null;
     if (!chk) { box.innerHTML = ""; stats.innerHTML = ""; renderGlobalCheck(); return; }
-    if (state.depth < 2 || steps < 2) {
+    if (state.depth < 2) {
       box.innerHTML = '<p class="small muted">Set chain depth to 2 or 3: step 1 <em>is</em> the measurement, so only steps 2+ are a real prediction.</p>';
+      stats.innerHTML = ""; renderGlobalCheck(); return;
+    }
+    if (steps < 2) {
+      box.innerHTML = `<p class="small muted">The chain stops at step 1: none of the affected genes ${state.up ? "" : "that went <b>down</b> "}were themselves knocked down in this condition with a usable knockdown, so the model has nothing to pass on. Try a lower minimum effect${state.up ? "" : ", tick \"also pass effects through genes that went up\""}, or a gene with more targets.</p>`;
       stats.innerHTML = ""; renderGlobalCheck(); return;
     }
     const pts = chk.points;
@@ -675,9 +741,10 @@
     }
     svg += "</svg>";
     box.innerHTML = pts.length ? svg : '<p class="small muted">No measured genes received an indirect prediction. Try a lower minimum effect or more depth.</p>';
-    const verdict = chk.r == null ? "" : chk.r > 0.5 ? "good match" : chk.r > 0.2 ? "partial match" : chk.r > -0.1 ? "little or no match" : "opposite direction";
+    const few = chk.n < MIN_CHECK_GENES;
+    const verdict = chk.r == null ? "" : few ? `too few genes (< ${MIN_CHECK_GENES}) to judge` : chk.r > 0.5 ? "good match" : chk.r > 0.2 ? "partial match" : chk.r > -0.1 ? "little or no match" : "opposite direction";
     stats.innerHTML = `
-      <div><div class="big">${chk.r == null ? "–" : chk.r.toFixed(2)}</div><div class="small muted">correlation (r)${verdict ? ` · ${verdict}` : ""}</div></div>
+      <div><div class="big"${few ? ' style="opacity:.45"' : ""}>${chk.r == null ? "–" : chk.r.toFixed(2)}</div><div class="small muted">correlation (r)${verdict ? ` · ${verdict}` : ""}</div></div>
       <div><div class="big">${chk.signAgreement == null ? "–" : Math.round(chk.signAgreement * 100) + "%"}</div><div class="small muted">same direction</div></div>
       <div><div class="big">${chk.n}</div><div class="small muted">genes compared</div></div>`;
     renderGlobalCheck();
@@ -748,7 +815,9 @@
     }
     renderExamples();
     // react when someone edits or pastes a link with a different #hash
-    window.addEventListener("hashchange", () => { const g = readHash(); if (g != null) state.gene = g; update(); });
+    const fromUrl = () => { const g = readHash(); if (g != null) state.gene = g; lastMajor = null; update(); };
+    window.addEventListener("hashchange", fromUrl);
+    window.addEventListener("popstate", fromUrl);
     const fromHash = readHash();
     state.gene = fromHash != null ? fromHash : DB.byName.get("GATA3") ?? DB.perturbed[0];
     if (fromHash == null && !DB.pert[state.cond].has(state.gene)) selectGene(state.gene);
