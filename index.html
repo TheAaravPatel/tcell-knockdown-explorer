@@ -14,7 +14,7 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="logo" aria-hidden="true">⬇</span>
+    <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M12 4v13M6 12l6 6 6-6"/></svg></span>
     <div>
       <h1>Virtual Knockdown Explorer</h1>
       <p class="subtitle">Human CD4+ T cells · genome-scale CRISPRi Perturb-seq</p>
@@ -43,19 +43,19 @@
 
     <div class="ctl">
       <span class="ctl-label">Cell condition</span>
-      <div class="seg" id="condSeg" role="radiogroup" aria-label="Cell condition">
-        <button data-cond="Rest" role="radio">Rest</button>
-        <button data-cond="Stim8hr" role="radio">Stim 8hr</button>
-        <button data-cond="Stim48hr" role="radio">Stim 48hr</button>
+      <div class="seg" id="condSeg" role="group" aria-label="Cell condition">
+        <button data-cond="Rest">Rest</button>
+        <button data-cond="Stim8hr">Stim 8hr</button>
+        <button data-cond="Stim48hr">Stim 48hr</button>
       </div>
     </div>
 
     <div class="ctl">
       <span class="ctl-label">View</span>
-      <div class="seg" id="modeSeg" role="radiogroup" aria-label="View mode">
-        <button data-mode="measured" role="radio" title="What actually changed in the experiment">Measured</button>
-        <button data-mode="chain" role="radio" title="Predicted chain reaction through the gene network">Chain reaction</button>
-        <button data-mode="compare" role="radio" title="Same knockdown in two cell conditions, side by side">Compare</button>
+      <div class="seg" id="modeSeg" role="group" aria-label="View mode">
+        <button data-mode="measured" title="What actually changed in the experiment">Measured</button>
+        <button data-mode="chain" title="Predicted chain reaction through the gene network">Chain reaction</button>
+        <button data-mode="compare" title="Same knockdown in two cell conditions, side by side">Compare</button>
       </div>
     </div>
 
@@ -91,7 +91,8 @@
   </section>
 
   <!-- ===================== Gene summary ===================== -->
-  <section id="summary" class="summary card" aria-live="polite">
+  <p id="srStatus" class="sr-only" role="status" aria-live="polite"></p>
+  <section id="summary" class="summary card">
     <p class="muted">Loading data…</p>
   </section>
 
@@ -110,12 +111,12 @@
         <button id="fitBtn" class="small-btn" title="Re-center the network">Re-center</button>
       </div>
       <div id="chainNote" class="note chain-only" role="note">
-        <b>This is a simplified prediction.</b> Measured effects already include some indirect effects, so this model can double-count. Solid = measured, dashed = predicted.
+        <svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm-.8 3.2h1.6v1.6H7.2V4.2zm0 3h1.6v4.6H7.2V7.2z"/></svg><span><b>This is a simplified prediction.</b> Measured effects already include some indirect effects, so this model can double-count. Solid = measured, dashed = predicted.</span>
       </div>
       <div id="graphs" class="graphs">
         <div class="graph-pane">
           <div class="pane-title compare-only" id="paneTitle1"></div>
-          <div id="cy1" class="cy" role="img" aria-label="Network of affected genes"></div>
+          <div id="cy1" class="cy" role="img" aria-label="Network of affected genes. The same genes are listed in the table below, which works with the keyboard."></div>
         </div>
         <div class="graph-pane compare-only">
           <div class="pane-title" id="paneTitle2"></div>
@@ -127,12 +128,12 @@
 
     <aside class="side">
       <div id="details" class="card details">
-        <h3>Gene details</h3>
+        <h2>Gene details</h2>
         <p class="muted">Click any circle in the network to see its details.</p>
       </div>
 
       <div id="checkPanel" class="card check chain-only">
-        <h3>Model check</h3>
+        <h2>Model check</h2>
         <p class="small muted">Does the chain reaction (step 2+ only) predict the effects that were actually measured?</p>
         <div id="scatter" class="scatter"></div>
         <div id="checkStats" class="check-stats"></div>
@@ -141,7 +142,7 @@
       </div>
 
       <div id="comparePanel" class="card compare-only">
-        <h3>Condition comparison</h3>
+        <h2>Condition comparison</h2>
         <div id="compareStats"></div>
       </div>
     </aside>
@@ -150,7 +151,7 @@
   <!-- ===================== Table ===================== -->
   <section class="card table-card">
     <div class="table-head">
-      <h3 id="tableTitle">Affected genes</h3>
+      <h2 id="tableTitle">Affected genes</h2>
       <span id="tableCount" class="muted small"></span>
     </div>
     <div class="table-wrap">
@@ -166,27 +167,27 @@
     <h2>About this tool</h2>
     <div class="about-grid">
       <div>
-        <h4>What is Perturb-seq?</h4>
+        <h3>What is Perturb-seq?</h3>
         <p>Scientists switch off one gene in a cell, then read out the activity (RNA levels) of thousands of other genes in that single cell. Doing this for every gene, across millions of cells, maps which genes control which.</p>
       </div>
       <div>
-        <h4>What does CRISPRi knockdown mean?</h4>
+        <h3>What does CRISPRi knockdown mean?</h3>
         <p>CRISPR interference uses a "dead" Cas9 that cannot cut DNA. It is guided to a gene's start and sits there, turning the gene <em>down</em> (not fully off). The tool shows how strongly each gene was actually reduced.</p>
       </div>
       <div>
-        <h4>What do the colors mean?</h4>
+        <h3>What do the colors mean?</h3>
         <p><span class="tag down">Blue</span> genes went <b>down</b> after the knockdown; <span class="tag up">red</span> genes went <b>up</b>. Effect sizes are log₂ fold changes: −1 means halved, +1 means doubled. Only genes with adjusted p-value &lt; 0.05 are shown (top 200 per gene).</p>
       </div>
       <div>
-        <h4>What does the chain-reaction model assume?</h4>
+        <h3>What does the chain-reaction model assume?</h3>
         <p>If gene A lowers gene B, and we know what knocking down B does, then B passes on a proportional share of its own effects: share = (change in B) ÷ (B's own knockdown). Effects add up along paths and are capped. It assumes effects are linear and additive, ignores genes never knocked down in the screen, and can double-count because measured effects already contain indirect ones.</p>
       </div>
       <div>
-        <h4>Cell conditions</h4>
+        <h3>Cell conditions</h3>
         <p><b>Rest</b>: resting T cells. <b>Stim 8hr / 48hr</b>: T cells 8 or 48 hours after activation (as when fighting an infection). A key finding of the paper is that many regulators act very differently in resting vs. activated cells.</p>
       </div>
       <div>
-        <h4>Data &amp; citation</h4>
+        <h3>Data &amp; citation</h3>
         <p>Zhu, Dann <em>et al.</em> "Genome-scale perturb-seq in primary human CD4+ T cells maps context-specific regulators of T cell programs and human immune traits." <em>Cell</em> (2026). Data: <a href="https://virtualcellmodels.cziscience.com/dataset/genome-scale-tcell-perturb-seq" target="_blank" rel="noopener">CZI Virtual Cells Platform</a> (file GWCD4i.DE_stats.h5ad). Perturbations flagged for possible off-target effects or low target expression were removed.</p>
       </div>
     </div>

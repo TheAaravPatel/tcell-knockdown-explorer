@@ -116,6 +116,7 @@
   };
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const reduceMotion = () => window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
   function dirTag(v) {
@@ -158,8 +159,8 @@
   // =====================================================================
   function syncControls() {
     document.body.dataset.mode = state.mode;
-    for (const b of $("condSeg").children) b.setAttribute("aria-checked", b.dataset.cond === state.cond);
-    for (const b of $("modeSeg").children) b.setAttribute("aria-checked", b.dataset.mode === state.mode);
+    for (const b of $("condSeg").children) b.setAttribute("aria-pressed", b.dataset.cond === state.cond);
+    for (const b of $("modeSeg").children) b.setAttribute("aria-pressed", b.dataset.mode === state.mode);
     $("topN").value = state.topN; $("topNVal").textContent = state.topN;
     $("depth").value = state.depth; $("depthVal").textContent = state.depth;
     $("cutoff").value = state.cutoff; $("cutoffVal").textContent = (+state.cutoff).toFixed(2);
@@ -202,7 +203,7 @@
   function setupAutocomplete() {
     const input = $("geneInput"), list = $("acList");
     let items = [], active = -1;
-    const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); active = -1; };
+    const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); active = -1; };
     const hint = (gi) => {
       const p = DB.pert[state.cond].get(gi);
       if (p) return `${p.nSig} targets`;
@@ -220,8 +221,9 @@
       }
       items = pre.concat(sub).slice(0, 12);
       if (!items.length) { list.innerHTML = '<li class="hint">No perturbed gene matches</li>'; list.hidden = false; return; }
-      list.innerHTML = items.map((gi, i) => `<li role="option" data-i="${i}" aria-selected="${i === active}"><span>${esc(DB.genes[gi])}</span><span class="hint">${hint(gi)}</span></li>`).join("");
+      list.innerHTML = items.map((gi, i) => `<li role="option" id="ac-opt-${i}" data-i="${i}" aria-selected="${i === active}"><span>${esc(DB.genes[gi])}</span><span class="hint">${hint(gi)}</span></li>`).join("");
       list.hidden = false; input.setAttribute("aria-expanded", "true");
+      if (active >= 0) input.setAttribute("aria-activedescendant", `ac-opt-${active}`); else input.removeAttribute("aria-activedescendant");
     };
     const pick = (gi) => { close(); input.value = DB.genes[gi]; input.blur(); selectGene(gi); };
     input.addEventListener("input", () => { active = -1; show(); });
@@ -272,6 +274,13 @@
     update();
   }
 
+  let lastAnnounce = "";
+  function announce() {
+    if (state.gene == null) return;
+    const msg = `${name(state.gene)} knocked down in ${COND_LABEL[state.cond]}, ${{ measured: "measured effects", chain: "chain reaction", compare: "compare with " + COND_LABEL[state.cond2] }[state.mode]}`;
+    if (msg !== lastAnnounce) { $("srStatus").textContent = msg; lastAnnounce = msg; }
+  }
+
   // =====================================================================
   // Summary card
   // =====================================================================
@@ -291,7 +300,7 @@
         : `<span class="v">z = ${fmt(p.kdz, 1)}</span><span class="k">gene not in measured panel; z-score shown</span>`;
       body = `
         <div class="stat"><span class="k">How much was it reduced?</span>${kdTxt}
-          ${p.kdSig ? "" : '<span class="warn">⚠ knockdown not statistically significant</span>'}</div>
+          ${p.kdSig ? "" : '<span class="warn"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.5 15 14H1L8 1.5zm-.8 4.5v4h1.6V6H7.2zm0 5.2v1.6h1.6v-1.6H7.2z"/></svg>knockdown not statistically significant</span>'}</div>
         <div class="stat"><span class="v">${p.nSig.toLocaleString()}</span><span class="k">significant targets (adj. p &lt; ${DB.params.padj_threshold})</span></div>
         <div class="stat"><span class="v"><span style="color:var(--down)">${(p.nSig - p.nUp).toLocaleString()}↓</span> · <span style="color:var(--up)">${p.nUp.toLocaleString()}↑</span></span><span class="k">down · up</span></div>
         <div class="stat"><span class="v">${p.nCells ? p.nCells.toLocaleString() : "–"}</span><span class="k">cells with this knockdown</span></div>`;
@@ -323,7 +332,7 @@
       { selector: "node", style: {
         "background-color": (n) => (n.data("v") < 0 ? down : up),
         width: "data(size)", height: "data(size)", label: "data(label)",
-        "font-size": 10, color: text, "text-valign": "bottom", "text-margin-y": 2,
+        "font-size": 12, color: text, "text-valign": "bottom", "text-margin-y": 2,
         "text-outline-color": bg, "text-outline-width": 2, "min-zoomed-font-size": 7,
         "border-width": 0,
       } },
@@ -584,7 +593,7 @@
     const el = $("details");
     const src = state.gene;
     if (gi === src) {
-      el.innerHTML = `<h3>${esc(name(gi))}</h3><p class="small">This is the knocked-down gene (center). Click any other circle to see how it changed.</p>`;
+      el.innerHTML = `<h2>${esc(name(gi))}</h2><p class="small">This is the knocked-down gene (center). Click any other circle to see how it changed.</p>`;
       return;
     }
     const meas = (getTargets(cond, src) || []).find((t) => t[0] === gi);
@@ -601,7 +610,7 @@
     }
     const p = DB.pert[cond].get(gi);
     const anyCond = CONDS.find((c) => DB.pert[c].has(gi));
-    el.innerHTML = `<h3>${esc(name(gi))}</h3>
+    el.innerHTML = `<h2>${esc(name(gi))}</h2>
       <dl>
         <dt>Measured change</dt><dd>${meas ? `${dirTag(meas[1])} ${fmt(meas[1])} log₂FC (~${level(meas[1])})` : "not significant"}</dd>
         ${meas ? `<dt>Adjusted p</dt><dd>${fmtP(meas[2])}</dd>` : ""}
@@ -609,7 +618,7 @@
         <dt>Own knockdown</dt><dd>${p ? `${p.nSig} targets in ${COND_LABEL[cond]}${p.kd != null ? `, reduced to ~${pctLeft(p.kd)}%` : ""}` : DB.removed[cond].has(gi) ? "filtered by QC here" : "not knocked down in this condition"}</dd>
       </dl>
       <button class="btn" id="kdThis" ${anyCond ? "" : "disabled"}>${anyCond ? `Knock ${esc(name(gi))} down instead` : "Never knocked down in this screen"}</button>`;
-    if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: "smooth" }); });
+    if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: reduceMotion() ? "auto" : "smooth" }); });
   }
 
   function showCompareDetails(gi) {
@@ -619,10 +628,10 @@
       return `<dt>${COND_LABEL[c]}</dt><dd>${m ? `${dirTag(m[1])} ${fmt(m[1])} log₂FC (~${level(m[1])}), adj. p ${fmtP(m[2])}` : "not significant"}</dd>`;
     };
     const anyCond = CONDS.find((c) => DB.pert[c].has(gi));
-    el.innerHTML = `<h3>${esc(name(gi))}</h3><p class="small muted" style="margin:0">Change after knocking down ${esc(name(src))}:</p>
+    el.innerHTML = `<h2>${esc(name(gi))}</h2><p class="small muted" style="margin:0">Change after knocking down ${esc(name(src))}:</p>
       <dl>${row(state.cond)}${row(state.cond2)}</dl>
       <button class="btn" id="kdThis" ${anyCond ? "" : "disabled"}>${anyCond ? `Knock ${esc(name(gi))} down instead` : "Never knocked down in this screen"}</button>`;
-    if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: "smooth" }); });
+    if (anyCond) $("kdThis").addEventListener("click", () => { selectGene(gi); window.scrollTo({ top: 0, behavior: reduceMotion() ? "auto" : "smooth" }); });
   }
 
   // =====================================================================
@@ -632,7 +641,7 @@
     measured: {
       title: "Measured effects",
       cols: [
-        { k: "gene", t: "Gene", f: (r) => `<span class="genelink">${esc(name(r.gi))}</span>`, s: (r) => name(r.gi) },
+        { k: "gene", t: "Gene", f: (r) => `<button type="button" class="genelink">${esc(name(r.gi))}</button>`, s: (r) => name(r.gi) },
         { k: "dir", t: "Direction", f: (r) => dirTag(r.lfc), s: (r) => Math.sign(r.lfc) },
         { k: "lfc", t: "Effect (log₂FC)", f: (r) => fmt(r.lfc), s: (r) => Math.abs(r.lfc) },
         { k: "pct", t: "Level vs normal", f: (r) => level(r.lfc), s: (r) => r.lfc },
@@ -643,7 +652,7 @@
     chain: {
       title: "Predicted chain reaction",
       cols: [
-        { k: "gene", t: "Gene", f: (r) => `<span class="genelink">${esc(name(r.gi))}</span>`, s: (r) => name(r.gi) },
+        { k: "gene", t: "Gene", f: (r) => `<button type="button" class="genelink">${esc(name(r.gi))}</button>`, s: (r) => name(r.gi) },
         { k: "step", t: "Step", f: (r) => r.step, s: (r) => -r.step },
         { k: "dir", t: "Direction", f: (r) => dirTag(r.total), s: (r) => Math.sign(r.total) },
         { k: "total", t: "Predicted total", f: (r) => fmt(r.total), s: (r) => Math.abs(r.total) },
@@ -655,7 +664,7 @@
     compare: {
       title: "Compare conditions",
       cols: [
-        { k: "gene", t: "Gene", f: (r) => `<span class="genelink">${esc(name(r.gi))}</span>`, s: (r) => name(r.gi) },
+        { k: "gene", t: "Gene", f: (r) => `<button type="button" class="genelink">${esc(name(r.gi))}</button>`, s: (r) => name(r.gi) },
         { k: "a", t: () => COND_LABEL[state.cond] + " (log₂FC)", f: (r) => fmt(r.a), s: (r) => Math.abs(r.a || 0) },
         { k: "b", t: () => COND_LABEL[state.cond2] + " (log₂FC)", f: (r) => fmt(r.b), s: (r) => Math.abs(r.b || 0) },
         { k: "status", t: "Affected in", f: (r) => (r.status === "both" ? '<span class="tag neutral">both</span>' : `<span class="tag only">${r.status}</span>`), s: (r) => r.status },
@@ -681,7 +690,7 @@
     const LIMIT = 500;
     $("tableCount").textContent = rows.length ? `${rows.length.toLocaleString()} genes${rows.length > LIMIT ? ` (showing first ${LIMIT})` : ""} · click a header to sort, a row to select` : "no genes";
     const thead = $("table").tHead;
-    thead.innerHTML = "<tr>" + T.cols.map((c) => `<th data-k="${c.k}">${typeof c.t === "function" ? c.t() : c.t}${c.k === current.sortKey ? (current.sortDir < 0 ? " ▼" : " ▲") : ""}</th>`).join("") + "</tr>";
+    thead.innerHTML = "<tr>" + T.cols.map((c) => `<th data-k="${c.k}"${c.k === current.sortKey ? ` aria-sort="${current.sortDir < 0 ? "descending" : "ascending"}"` : ""}><button type="button" class="th-btn">${typeof c.t === "function" ? c.t() : c.t}${c.k === current.sortKey ? (current.sortDir < 0 ? " ▼" : " ▲") : ""}</button></th>`).join("") + "</tr>";
     thead.querySelectorAll("th").forEach((th) => th.addEventListener("click", () => {
       if (current.sortKey === th.dataset.k) current.sortDir *= -1; else { current.sortKey = th.dataset.k; current.sortDir = -1; }
       drawTable();
@@ -696,10 +705,10 @@
     let found = false;
     for (const cy of [cy1, cy2]) {
       const node = cy && cy.getElementById(String(gi));
-      if (node && node.length) { cy.$(":selected").unselect(); node.select(); onNodeTap(cy, node); cy.animate({ center: { eles: node } }, { duration: 300 }); found = true; }
+      if (node && node.length) { cy.$(":selected").unselect(); node.select(); onNodeTap(cy, node); cy.animate({ center: { eles: node } }, { duration: reduceMotion() ? 0 : 300 }); found = true; }
     }
     if (!found) showDetails(gi, state.cond);
-    $("details").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("details").scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "nearest" });
   });
 
   // =====================================================================
@@ -760,12 +769,12 @@
     const bins = c.hist, max = Math.max(...bins.map((b) => b.count));
     const W = 300, H = 90, P = 10, bw = (W - 2 * P) / bins.length;
     const acc = css("--accent"), muted = css("--muted");
-    let svg = `<svg viewBox="0 0 ${W} ${H + 14}" role="img" aria-label="Histogram of model-check correlations">`;
+    let svg = `<svg viewBox="0 0 ${W} ${H + 16}" role="img" aria-label="Histogram of model-check correlations">`;
     bins.forEach((b, i) => {
       const h = max ? (b.count / max) * H : 0;
       svg += `<rect x="${P + i * bw + 1}" y="${H - h}" width="${bw - 2}" height="${h}" fill="${acc}" opacity="${b.lo >= 0 ? 0.9 : 0.45}"><title>r ${b.lo.toFixed(1)} to ${b.hi.toFixed(1)}: ${b.count} genes</title></rect>`;
     });
-    [-1, -0.5, 0, 0.5, 1].forEach((v) => { svg += `<text x="${P + ((v + 1) / 2) * (W - 2 * P)}" y="${H + 12}" text-anchor="middle" fill="${muted}" font-size="10">${v}</text>`; });
+    [-1, -0.5, 0, 0.5, 1].forEach((v) => { svg += `<text x="${P + ((v + 1) / 2) * (W - 2 * P)}" y="${H + 14}" text-anchor="middle" fill="${muted}" font-size="12">${v}</text>`; });
     svg += "</svg>";
     el.innerHTML = `<h3 style="font-size:.9rem">Across all genes (${COND_LABEL[state.cond]})</h3>
       <p class="small" style="margin:0 0 4px">Median correlation <b>${c.median_r.toFixed(2)}</b> over ${c.n_genes.toLocaleString()} knockdowns (depth ${d.settings.depth}, min effect ${d.settings.cutoff}, ${state.up ? "up + down paths" : "down paths only"}); ${Math.round(c.frac_positive * 100)}% positive.</p>${svg}
@@ -781,10 +790,11 @@
     syncControls();
     writeHash();
     renderSummary();
+    announce();
     destroyCys();
     $("cy1").innerHTML = ""; $("cy2").innerHTML = "";
     showGraphMsg(null);
-    $("details").innerHTML = '<h3>Gene details</h3><p class="muted">Click any circle in the network to see its details.</p>';
+    $("details").innerHTML = '<h2>Gene details</h2><p class="muted">Click any circle in the network to see its details.</p>';
     if (state.gene == null) { showGraphMsg("Pick a gene to knock down."); return; }
     try {
       if (state.mode === "measured") await renderMeasured(token);
